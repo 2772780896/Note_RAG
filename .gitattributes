@@ -1,0 +1,39 @@
+# ============================================================
+# 换行符统一规则（跨平台团队协作必备）
+# 【面试必考】为什么需要这个文件？
+#   答：Windows 开发者用 CRLF，Linux/Mac 开发者用 LF，
+#       如果不统一，每次 PR 都会产生无意义的 diff（整行被标记修改）
+# ============================================================
+
+# 所有文本文件，checkout 时保持 LF，commit 时转成 LF
+# text=auto 让 Git 自动判断哪些是文本文件
+* text=auto eol=lf
+
+# Python 文件强制 LF（服务器端通常是 Linux）
+*.py text eol=lf
+
+# 配置文件强制 LF
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Markdown 文件强制 LF
+*.md text eol=lf
+
+# 二进制文件不转换（防止图片/模型文件损坏）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.pkl binary
+*.npy binary
+
+# ============================================================
+# 【底层原理】eol=lf 的含义：
+#   - checkout 时：无论操作系统，文件都用 LF
+#   - commit 时：  Git 内部存储也用 LF
+#   这样整个团队的文件换行符完全一致
+# ============================================================
