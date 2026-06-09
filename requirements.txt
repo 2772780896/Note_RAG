@@ -1,4 +1,20 @@
+# MCP Server framework (allows RAG to be called by CodeBuddy)
 mcp>=1.0.0
+
+# Vector database (local persistence)
 chromadb>=0.5.0
+
+# Embedding model (runs locally, no API Key needed)
 sentence-transformers>=3.0.0
+
+# LangChain text splitters (Markdown header split + recursive character split)
 langchain-text-splitters>=0.3.0
+
+# LangChain core (Document object definition)
+langchain-core>=0.3.0
+
+# File watching (monitor note directories, auto re-index)
+watchdog>=4.0.0
+
+# YAML parsing (parse Markdown Front Matter metadata)
+PyYAML>=6.0.0
