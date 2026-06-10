@@ -2,11 +2,15 @@
 # 笔记 RAG 配置文件
 # ============================================================
 
+import os
+
+# HuggingFace 镜像（国内直连，避免梯子）
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 # 笔记源文件目录（你的 md 笔记所在位置）
 # 支持多个目录，程序会递归扫描所有 .md 文件
 NOTES_DIRS = [
-    r"E:\学习相关\学习笔记\python基础\py基础-md",
-    r"E:\学习相关\学习笔记\前后端-md",
+    r"E:\学习相关\实战项目\RAG笔记库",
 ]
 
 # ChromaDB 持久化目录（向量数据库存本地磁盘的位置）

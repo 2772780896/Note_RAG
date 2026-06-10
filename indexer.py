@@ -8,6 +8,8 @@
 """
 
 import os
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 import re
 import yaml
 import glob
@@ -24,17 +26,23 @@ from config import NOTES_DIRS, CHROMA_DB_PATH, EMBEDDING_MODEL, CHUNK_SIZE, CHUN
 
 def _load_model():
     """直接创建 SentenceTransformer 实例，参数是模型名。首次调用会从 HuggingFace 下载模型并缓存。"""
-    return SentenceTransformer(EMBEDDING_MODEL)
+    print(f"⏳ 正在加载 Embedding 模型: {EMBEDDING_MODEL} ...")
+    model = SentenceTransformer(EMBEDDING_MODEL)
+    print("✅ Embedding 模型加载完成")
+    return model
 
 
 def _load_collection():
     """打开（或创建）ChromaDB Collection"""
+    print("⏳ 正在连接 ChromaDB ...")
     os.makedirs(CHROMA_DB_PATH, exist_ok=True)
     client = chromadb.PersistentClient(path=CHROMA_DB_PATH)  # ChromaDB 的持久化客户端，数据写入 SQLite
-    return client.get_or_create_collection(
+    collection = client.get_or_create_collection(
         name="notes",
         metadata={"hnsw:space": "cosine"},  # 使用 HNSW 索引（高效近似最近邻搜索），距离函数为余弦
     )
+    print(f"✅ ChromaDB 连接成功，当前切片数: {collection.count()}")
+    return collection
 
 
 def _parse_front_matter(text: str) -> tuple[dict, str]:
@@ -152,7 +160,18 @@ def _split_markdown(file_path: str) -> list[dict]:
             # 合并 YAML Front Matter（如 title, tags）
             if front_matter:
                 for key, value in front_matter.items():
-                    chunk_metadata[f"fm_{key}"] = value  # fm_ 前缀表示来自 Front Matter
+                    # ChromaDB metadata 只接受 str/int/float/bool/list/None
+                    # YAML 解析可能产生 date/datetime/dict 等非基本类型，统一转为字符串
+                    if value is None:
+                        continue  # 跳过 None 值，避免存入无意义的空字段
+                    elif isinstance(value, (str, int, float, bool)):
+                        chunk_metadata[f"fm_{key}"] = value
+                    elif isinstance(value, list):
+                        # list 内部元素也可能是 date 等类型，逐个转成 str
+                        chunk_metadata[f"fm_{key}"] = [str(v) for v in value]
+                    else:
+                        # dict / date / datetime 等复杂类型，直接转字符串
+                        chunk_metadata[f"fm_{key}"] = str(value)
             
             chunks_data.append({
                 "content": sub_text,
@@ -191,6 +210,7 @@ def reindex_all():
 
     # 1. 清空旧数据
     # 先获取所有已有 id，逐个删除
+    print("🗑️  正在清空旧索引 ...")
     # collection.get() 返回一个字典，包含 "ids", "embeddings", "documents", "metadatas" 等键
     # 我们需要获取所有已存在的 ID，以便在删除时精准匹配
     existing = collection.get()
@@ -198,18 +218,26 @@ def reindex_all():
         # ChromaDB 的 delete 方法需要通过 ids 列表来指定要删除的记录
         # 这些 ids 是在之前调用 collection.add() 时创建的（见下文 reindex_all 中的 ids 生成逻辑）
         collection.delete(ids=existing["ids"])
+        print(f"   已清空 {len(existing['ids'])} 条旧记录")
+    else:
+        print("   索引为空，无需清空")
 
     # 2. 扫描所有 .md 文件
+    print("🔍 正在扫描笔记目录 ...")
     md_files = _find_md_files()
     if not md_files:
         return f"未在 {NOTES_DIRS} 下找到任何 .md 文件"
+    print(f"   找到 {len(md_files)} 个 .md 文件，开始处理 ...\n")
 
     # 3. 逐文件处理
     total_chunks = 0
-    for file_path in md_files:
+    for i, file_path in enumerate(md_files, 1):
+        print(f"  [{i}/{len(md_files)}] 正在处理: {os.path.basename(file_path)} ...", end=" ", flush=True)
         chunks = _split_markdown(file_path)
         if not chunks:
+            print("(无内容，跳过)")
             continue
+        print(f"切分为 {len(chunks)} 个切片 ...", end=" ", flush=True)
 
         # 4. 准备批量写入的数据
         # 从切分结果中提取文本内容、元数据和唯一ID，准备批量写入数据库
@@ -252,6 +280,7 @@ def reindex_all():
         # .tolist() 是将 NumPy 数组转换为 Python 原生列表 (list[list[float]])，
         # 因为 ChromaDB 的 add 方法通常期望接收原生的 Python 数据结构而非 NumPy 对象。
         embeddings = model.encode(texts, normalize_embeddings=True).tolist()
+        print("向量化完成 ...", end=" ", flush=True)
         collection.add(
             documents=texts,
             metadatas=metadatas,
@@ -259,7 +288,9 @@ def reindex_all():
             ids=ids,
         )
         total_chunks += len(chunks)
+        print("✅ 已写入")
 
+    print(f"\n🎉 全量索引完成：{len(md_files)} 个文件，{total_chunks} 个切片")
     return f"全量索引完成：{len(md_files)} 个文件，{total_chunks} 个切片"
 
 
@@ -280,19 +311,26 @@ def index_file(file_path: str):
 
     # 1. 删除该文件的旧切片（如果存在）
     # ChromaDB 的 get 方法可以用 where 按 metadata 过滤
+    print(f"🗑️  正在检查旧索引: {os.path.basename(file_path)} ...")
     old = collection.get(where={"source": file_path})
     if old["ids"]:
         collection.delete(ids=old["ids"])
+        print(f"   已删除 {len(old['ids'])} 条旧记录")
+    else:
+        print("   无旧索引")
 
     # 2. 切分 + Embedding + 写入
+    print(f"⏳ 正在切分文件 ...", end=" ", flush=True)
     chunks = _split_markdown(file_path)
     if not chunks:
         return f"文件无有效内容: {file_path}"
+    print(f"共 {len(chunks)} 个切片 ...", end=" ", flush=True)
 
     texts = [c["content"] for c in chunks]
     metadatas = [c["metadata"] for c in chunks]
     ids = [f"{file_path}__{i}" for i in range(len(chunks))]
 
+    print("向量化 ...", end=" ", flush=True)
     embeddings = model.encode(texts, normalize_embeddings=True).tolist()
     collection.add(
         documents=texts,
@@ -300,6 +338,7 @@ def index_file(file_path: str):
         embeddings=embeddings,
         ids=ids,
     )
+    print("✅ 已写入")
 
     return f"已索引: {file_path} → {len(chunks)} 个切片"
 

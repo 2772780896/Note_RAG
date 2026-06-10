@@ -168,11 +168,12 @@ IDE (Client)                         rag_server.py (Server)
     │  LLM 基于检索结果生成最终回答           │
 ```
 
-### 暴露的 Tool
+### 暴露的 5 个 Tool
 
 | Tool | 功能 | 参数 |
 |------|------|------|
-| `search_notes` | 语义检索笔记 | `query: str`, `n_results: int=5` |
+| `search_notes` | 语义检索笔记片段 | `query: str`, `n_results: int=5` |
+| `get_full_file_content` | 获取已索引文件的完整内容 | `file_path: str` |
 | `index_file` | 增量索引单文件 | `path: str` |
 | `reindex_all_tool` | 全量重建索引 | 无 |
 | `list_sources_tool` | 列出已索引文件 | 无 |

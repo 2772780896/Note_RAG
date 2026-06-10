@@ -1,11 +1,12 @@
 """
 RAG Server —— MCP 入口，通过 stdio 与 CodeBuddy 通信。
 
-暴露 4 个 Tool:
+暴露 5 个 Tool:
     search_notes(query, n_results=5)
     index_file(path)
     reindex_all()
     list_sources()
+    get_full_file_content(file_path)
 
 CodeBuddy 配置写在 codebuddy_mcp_settings.json:
 {
@@ -29,7 +30,7 @@ from mcp.server.fastmcp import FastMCP
 from indexer import reindex_all as indexer_reindex_all
 from indexer import index_file as indexer_index_file
 from indexer import list_sources as indexer_list_sources
-from retriever import search
+from retriever import search, get_full_file
 
 # ------------------------------------------------------------
 # 初始化 FastMCP 实例
@@ -116,6 +117,7 @@ def reindex_all_tool() -> str:
 def list_sources_tool() -> str:
     """
     列出当前 ChromaDB 中所有已索引的源文件及其切片数量。
+    当需要查找某个文件的完整路径时，先调用此工具获取文件列表。
 
     :return: 格式化的源文件列表
     """
@@ -131,6 +133,39 @@ def list_sources_tool() -> str:
     for s in sources:
         lines.append(s)
     return "\n".join(lines)
+
+
+# ============================================================
+# Tool 5: 获取完整文件内容
+# ============================================================
+@mcp.tool()
+def get_full_file_content(file_path: str) -> str:
+    """
+    获取指定已索引文件的完整内容（所有切片按顺序拼接为全文）。
+    
+    适用场景:
+        - 需要参考整个文件的完整内容（如最佳实践文档、接口规范、模板参考）
+        - 语义检索（search_notes）返回的片段不够完整时，用此工具获取全文
+    
+    注意: 需先通过 list_sources_tool 获取文件路径，再传入此工具。
+
+    :param file_path: .md 文件的绝对路径（从 list_sources_tool 获取）
+    :return: 文件的完整内容
+    """
+    if not file_path or not file_path.strip():
+        return "错误: 文件路径不能为空"
+
+    try:
+        results = get_full_file(file_path=file_path.strip())
+    except Exception as e:
+        return f"获取失败: {e}"
+
+    if not results:
+        return f"未找到已索引的文件: {file_path}，请先通过 index_file 索引该文件"
+
+    r = results[0]
+    header = f"文件: {r['source']}\n切片数: {r['chunk_count']}\n{'='*60}\n\n"
+    return header + r["content"]
 
 
 # ============================================================

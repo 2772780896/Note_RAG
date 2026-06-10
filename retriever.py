@@ -6,6 +6,8 @@
 """
 
 import os
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 from typing import Optional
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.cross_encoder import CrossEncoder
@@ -162,3 +164,45 @@ def search(query: str, n_results: int = DEFAULT_TOP_K) -> list[dict]:
         })
 
     return formatted_results
+
+
+def get_full_file(file_path: str) -> list[dict]:
+    """
+    获取指定文件的完整索引内容（所有切片按顺序拼接）。
+    
+    适用场景:
+        - 需要参考整个文件的完整内容（如最佳实践文档、接口规范）
+        - 语义检索的片段不够完整时，获取全文
+    
+    参数:
+        file_path: .md 文件的绝对路径
+    
+    返回:
+        list[dict]，包含:
+            - "content": 完整拼接的文本
+            - "source": 文件路径
+            - "chunk_count": 切片总数
+    """
+    collection = _get_collection()
+    
+    # 按 metadata 中的 source 字段过滤，获取该文件的所有切片
+    data = collection.get(
+        where={"source": file_path},
+        include=["documents", "metadatas"],
+    )
+    
+    if not data["ids"]:
+        return []
+    
+    # 按 id 排序（id 格式为 "file_path__序号"），保证切片顺序
+    paired = sorted(zip(data["ids"], data["documents"]), key=lambda x: x[0])
+    sorted_docs = [doc for _, doc in paired]
+    
+    # 拼接所有切片
+    full_content = "\n\n".join(sorted_docs)
+    
+    return [{
+        "content": full_content,
+        "source": file_path,
+        "chunk_count": len(sorted_docs),
+    }]
